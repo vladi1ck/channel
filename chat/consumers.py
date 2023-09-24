@@ -1,6 +1,13 @@
 import json
 from channels.generic.websocket import WebsocketConsumer
 from asgiref.sync import async_to_sync
+from djangochannelsrestframework import permissions
+from djangochannelsrestframework.generics import GenericAsyncAPIConsumer
+from djangochannelsrestframework.mixins import ListModelMixin
+from djangochannelsrestframework.observer import model_observer
+
+from .models import Parameter
+from .serializers import ParameterSerializer
 
 class ChatConsumer(WebsocketConsumer):
     def connect(self):
@@ -12,7 +19,10 @@ class ChatConsumer(WebsocketConsumer):
         )
 
         self.accept()
-   
+        self.send(text_data=json.dumps({
+            'status':'connected'
+        }))
+
 
     def receive(self, text_data):
         text_data_json = json.loads(text_data)
@@ -33,3 +43,25 @@ class ChatConsumer(WebsocketConsumer):
             'type':'chat',
             'message':message
         }))
+
+
+class ParameterConsumer(ListModelMixin, GenericAsyncAPIConsumer):
+
+    queryset = Parameter.objects.all()
+    serializer_class = ParameterSerializer
+    permissions = (permissions.AllowAny,)
+
+    async def connect(self, **kwargs):
+        await self.model_change.subscribe()
+        await super().connect()
+        await self.send(text_data=json.dumps({
+            'status': 'connected'
+        }))
+
+    @model_observer(Parameter)
+    async def model_change(self, message, observer=None, **kwargs):
+        await self.send_json(message)
+
+    @model_change.serializer
+    def model_serialize(self, instance, action, **kwargs):
+        return dict(data=ParameterSerializer(instance=instance).data, action=action.value)
